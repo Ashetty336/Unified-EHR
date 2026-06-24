@@ -1,4 +1,5 @@
 import { adminClient } from '@/lib/supabase/admin'
+import { encryptBuffer, decryptBuffer } from '@/lib/crypto'
 
 const BUCKET = process.env.MEDICAL_UPLOADS_BUCKET ?? 'medical-uploads'
 
@@ -33,9 +34,11 @@ export async function uploadOriginalFile(
   buffer: Buffer,
   contentType: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  // Encrypt at rest (AES-256-GCM) before the bytes ever touch storage.
+  const encrypted = encryptBuffer(buffer)
   const { error } = await adminClient.storage
     .from(BUCKET)
-    .upload(storagePath, buffer, {
+    .upload(storagePath, encrypted, {
       contentType,
       upsert: false,
     })
@@ -49,13 +52,24 @@ export async function downloadOriginalFile(
   const { data, error } = await adminClient.storage.from(BUCKET).download(storagePath)
   if (error || !data) return { ok: false, error: error?.message ?? 'not found' }
   const arr = await data.arrayBuffer()
+  // Decrypt at read time. Legacy plaintext (no magic header) passes through.
+  let buffer: Buffer
+  try {
+    buffer = decryptBuffer(Buffer.from(arr))
+  } catch {
+    return { ok: false, error: 'decryption failed' }
+  }
   return {
     ok: true,
-    buffer: Buffer.from(arr),
+    buffer,
     contentType: data.type || 'application/octet-stream',
   }
 }
 
+// WARNING: stored objects are AES-256-GCM encrypted. A signed URL serves the
+// raw ciphertext from Supabase, bypassing decryptBuffer — the client receives
+// an undecryptable blob. Do NOT use for medical files; stream them through a
+// route handler that calls downloadOriginalFile instead.
 export async function createSignedUrl(
   storagePath: string,
   expiresInSeconds = 300,
