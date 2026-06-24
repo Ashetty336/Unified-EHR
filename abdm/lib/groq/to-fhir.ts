@@ -16,6 +16,20 @@ type BundleEntry = {
 
 export type FhirBundleResult = { resourceType: 'Bundle'; type: 'collection'; entry: BundleEntry[] }
 
+// Split a free-text name into a FHIR HumanName. The dashboard reads name[0].given
+// and name[0].family, so populate both (text alone renders as "Unknown").
+function buildHumanName(full: string): Record<string, unknown> {
+  const parts = full.trim().split(/\s+/)
+  const given = parts.slice(0, -1)
+  const family = parts.length > 1 ? parts[parts.length - 1] : parts[0]
+  return {
+    use: 'official',
+    text: full.trim(),
+    ...(given.length ? { given } : {}),
+    family,
+  }
+}
+
 function entry(resource: FhirResource): BundleEntry {
   return {
     fullUrl: `urn:uuid:${resource.id}`,
@@ -87,9 +101,7 @@ export function prescriptionToBundle(
   const patient: FhirResource = {
     resourceType: 'Patient',
     id: patientId,
-    ...(extraction.patientName
-      ? { name: [{ use: 'official', text: extraction.patientName }] }
-      : {}),
+    ...(extraction.patientName ? { name: [buildHumanName(extraction.patientName)] } : {}),
   }
 
   const entries: BundleEntry[] = [entry(patient)]
