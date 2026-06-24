@@ -5,6 +5,7 @@ import {
   Building2,
   CheckCircle2,
   Clock,
+  FileText,
   Hourglass,
   LayoutGrid,
   ShieldCheck,
@@ -42,7 +43,9 @@ interface Hospital {
   name: string;
   address: string | null;
   phone: string | null;
+  official_email: string | null;
   registration_no: string | null;
+  certificate_path: string | null;
   approval_status: "pending" | "approved" | "rejected";
   created_at: string;
   approved_at: string | null;
@@ -52,6 +55,7 @@ interface Doctor {
   doctor_id: string;
   specialization: string | null;
   license_number: string | null;
+  certificate_path: string | null;
   approval_status: "pending" | "approved" | "rejected";
   created_at: string;
   approved_at: string | null;
@@ -441,6 +445,7 @@ function HospitalCard({
 
         <dl className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
           <Field k="Registration No." v={hospital.registration_no ?? "—"} mono />
+          <Field k="Official Email" v={hospital.official_email ?? "—"} />
           <Field k="Phone" v={hospital.phone ?? "—"} />
           <Field
             k="Address"
@@ -448,6 +453,12 @@ function HospitalCard({
             className="sm:col-span-2"
           />
         </dl>
+
+        <CertificateButton
+          href={`/api/admin/hospitals/${hospital.hospital_id}/certificate`}
+          available={!!hospital.certificate_path}
+          label="Open Certificate"
+        />
 
         {hospital.approval_status === "pending" ? (
           <div className="flex flex-wrap items-center gap-2 pt-1">
@@ -594,6 +605,12 @@ function DoctorCard({
           />
         </dl>
 
+        <CertificateButton
+          href={`/api/admin/doctors/${doctor.doctor_id}/certificate`}
+          available={!!doctor.certificate_path}
+          label="Open Certificate"
+        />
+
         {doctor.approval_status === "pending" ? (
           <div className="flex flex-wrap items-center gap-2 pt-1">
             <Button
@@ -652,6 +669,33 @@ function FilterTabs({
         </TabsTrigger>
       </TabsList>
     </Tabs>
+  );
+}
+
+function CertificateButton({
+  href,
+  available,
+  label,
+}: {
+  href: string;
+  available: boolean;
+  label: string;
+}) {
+  if (!available) {
+    return (
+      <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+        <FileText className="size-3.5" />
+        No certificate uploaded
+      </p>
+    );
+  }
+  return (
+    <Button asChild size="sm" variant="outline" className="rounded-full">
+      <a href={href} target="_blank" rel="noopener noreferrer">
+        <FileText className="size-4" />
+        {label}
+      </a>
+    </Button>
   );
 }
 

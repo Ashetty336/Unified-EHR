@@ -17,6 +17,17 @@ export function buildStoragePath(
   return `${patientUserId}/${uploadId}/${sanitizeFilename(filename)}`
 }
 
+// Registration/license certificates uploaded at signup, keyed by the
+// registrant's user_id. Kept under a dedicated prefix so they never collide
+// with patient medical uploads.
+export function buildCertificatePath(
+  userId: string,
+  kind: 'hospital' | 'doctor',
+  filename: string,
+): string {
+  return `certificates/${kind}/${userId}/${sanitizeFilename(filename)}`
+}
+
 export async function uploadOriginalFile(
   storagePath: string,
   buffer: Buffer,

@@ -18,6 +18,7 @@ export async function GET(req: NextRequest) {
       doctor_id,
       specialization,
       license_number,
+      certificate_path,
       approval_status,
       created_at,
       approved_at,

@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await adminClient
     .from('hospitals')
-    .select('hospital_id, name, address, phone, registration_no, approval_status, created_at, approved_at')
+    .select('hospital_id, name, address, phone, official_email, registration_no, certificate_path, approval_status, created_at, approved_at')
     .eq('approval_status', status)
     .order('created_at', { ascending: true })
 

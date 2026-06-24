@@ -125,6 +125,45 @@ function Field({
   );
 }
 
+function FileField({
+  label,
+  file,
+  onChange,
+  required,
+  hint,
+}: {
+  label: string;
+  file: File | null;
+  onChange: (f: File | null) => void;
+  required?: boolean;
+  hint?: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <label className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+        {label}
+        {required && <span className="ml-0.5 text-red-600">*</span>}
+      </label>
+      <label className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-[1.25rem] bg-muted/55 px-4 py-3 text-sm ring-1 ring-border transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] hover:bg-white focus-within:bg-white focus-within:ring-primary/35">
+        <span className={file ? "truncate font-medium text-foreground" : "text-muted-foreground/70"}>
+          {file ? file.name : "Choose PDF file"}
+        </span>
+        <span className="shrink-0 rounded-full bg-foreground/5 px-3 py-1 text-[11px] font-semibold text-foreground/70">
+          Browse
+        </span>
+        <input
+          type="file"
+          accept="application/pdf,.pdf"
+          required={required}
+          onChange={(e) => onChange(e.target.files?.[0] ?? null)}
+          className="sr-only"
+        />
+      </label>
+      {hint && <p className="text-[11px] leading-4 text-muted-foreground">{hint}</p>}
+    </div>
+  );
+}
+
 function Divider() {
   return (
     <div className="my-1 flex items-center gap-3">
@@ -139,6 +178,7 @@ export default function RegisterPage() {
   const router = useRouter();
   const [role, setRole] = useState<Role>("patient");
   const [form, setForm] = useState<FormState>(INITIAL);
+  const [certificate, setCertificate] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [oauthLoading, setOauthLoading] = useState(false);
   const [error, setError] = useState("");
@@ -164,32 +204,49 @@ export default function RegisterPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+
+    if ((role === "doctor" || role === "hospital") && !certificate) {
+      setError("Please upload the certificate PDF.");
+      return;
+    }
+
     setLoading(true);
     setError("");
 
-    const body: Record<string, string> = {
+    const fields: Record<string, string> = {
       email: form.email,
       role,
       full_name: form.full_name,
       phone: form.phone,
     };
     if (role === "doctor") {
-      body.hospital_id = form.hospital_id;
-      body.specialization = form.specialization;
-      body.license_number = form.license_number;
+      fields.hospital_id = form.hospital_id;
+      fields.specialization = form.specialization;
+      fields.license_number = form.license_number;
     }
     if (role === "hospital") {
-      body.name = form.name;
-      body.address = form.address;
-      body.registration_no = form.registration_no;
+      fields.name = form.name;
+      fields.address = form.address;
+      fields.registration_no = form.registration_no;
+    }
+
+    // Patient: plain JSON. Doctor/hospital: multipart so the certificate uploads.
+    let init: RequestInit;
+    if (role === "patient") {
+      init = {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(fields),
+      };
+    } else {
+      const fd = new FormData();
+      Object.entries(fields).forEach(([k, v]) => fd.append(k, v));
+      if (certificate) fd.append("certificate", certificate);
+      init = { method: "POST", body: fd };
     }
 
     try {
-      const res = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      const res = await fetch("/api/auth/register", init);
       const data = await res.json();
 
       if (!res.ok) {
@@ -305,7 +362,11 @@ export default function RegisterPage() {
                     <button
                       key={r}
                       type="button"
-                      onClick={() => setRole(r)}
+                      onClick={() => {
+                        setRole(r);
+                        setCertificate(null);
+                        setError("");
+                      }}
                       className={`rounded-full px-3 py-2 text-xs font-semibold transition-all duration-700 ease-[cubic-bezier(0.32,0.72,0,1)] ${
                         role === r ? "bg-card text-foreground shadow-[0_10px_24px_rgba(22,50,63,0.10)]" : "text-muted-foreground"
                       }`}
@@ -354,6 +415,13 @@ export default function RegisterPage() {
                         <Field label="Specialization" placeholder="Cardiology" value={form.specialization} onChange={set("specialization")} required />
                         <Field label="License number" placeholder="MCI-12345" value={form.license_number} onChange={set("license_number")} required />
                       </div>
+                      <FileField
+                        label="Medical Registration Certificate (PDF)"
+                        file={certificate}
+                        onChange={setCertificate}
+                        required
+                        hint="Admin verifies your license against this document before approval."
+                      />
                     </div>
                   )}
 
@@ -365,6 +433,13 @@ export default function RegisterPage() {
                       <Field label="Hospital / Institution name" placeholder="Apollo Hospitals" value={form.name} onChange={set("name")} required />
                       <Field label="Address" placeholder="123, MG Road, Bengaluru" value={form.address} onChange={set("address")} required />
                       <Field label="Registration number" placeholder="KA-HOS-2024-001" value={form.registration_no} onChange={set("registration_no")} required />
+                      <FileField
+                        label="Registration Certificate (PDF)"
+                        file={certificate}
+                        onChange={setCertificate}
+                        required
+                        hint="Admin verifies your institution against this document before approval."
+                      />
                     </div>
                   )}
 

@@ -10,6 +10,7 @@ import {
   Folder,
   Heart,
   IdCard,
+  Languages,
   LayoutGrid,
   Link2,
   Pill,
@@ -645,11 +646,46 @@ function OriginalTextPreview({ url, kind }: { url: string; kind: "json" | "xml" 
 
 // ─── Upload ────────────────────────────────────────────────────────────────────
 
+type InputType = "pdf" | "ccda" | "json" | "image";
+
+interface ExtractedMedicationView {
+  name: string;
+  dosage?: string;
+  frequency?: string;
+  duration?: string;
+  route?: string;
+  instructions?: string;
+}
+
+interface PrescriptionExtractionView {
+  detectedLanguage: string;
+  detectedLanguageName: string;
+  extractedText: string;
+  translatedText: string;
+  prescriber?: string;
+  patientName?: string;
+  prescribedDate?: string;
+  medications: ExtractedMedicationView[];
+  warnings: string[];
+}
+
+interface TranslateResult {
+  extraction: PrescriptionExtractionView;
+  bundle: unknown;
+}
+
 function UploadSection() {
-  const [inputType, setInputType] = React.useState<"pdf" | "ccda" | "json">("pdf");
+  const [inputType, setInputType] = React.useState<InputType>("pdf");
   const [file, setFile] = React.useState<File | null>(null);
   const [loading, setLoading] = React.useState(false);
+  const [result, setResult] = React.useState<TranslateResult | null>(null);
+  const [showJson, setShowJson] = React.useState(false);
   const fileRef = React.useRef<HTMLInputElement>(null);
+
+  const resetFile = () => {
+    setFile(null);
+    if (fileRef.current) fileRef.current.value = "";
+  };
 
   const submit = async () => {
     if (!file) {
@@ -657,19 +693,23 @@ function UploadSection() {
       return;
     }
     setLoading(true);
+    setResult(null);
     const fd = new FormData();
     fd.append("file", file);
     fd.append("inputType", inputType);
+    const endpoint =
+      inputType === "image" ? "/api/patient/prescription-translate" : "/api/patient/upload";
     try {
-      const res = await fetch("/api/patient/upload", {
-        method: "POST",
-        body: fd,
-      });
+      const res = await fetch(endpoint, { method: "POST", body: fd });
       const json = await res.json();
       if (res.ok) {
-        toast.success("Document uploaded and converted to FHIR.");
-        setFile(null);
-        if (fileRef.current) fileRef.current.value = "";
+        if (inputType === "image") {
+          setResult({ extraction: json.extraction, bundle: json.bundle });
+          toast.success("Prescription translated and saved to FHIR.");
+        } else {
+          toast.success("Document uploaded and converted to FHIR.");
+        }
+        resetFile();
       } else {
         toast.error(json.error ?? "Upload failed.");
       }
@@ -680,111 +720,246 @@ function UploadSection() {
     }
   };
 
+  const acceptFor = (t: InputType) =>
+    t === "ccda"
+      ? ".xml,.cda"
+      : t === "json"
+        ? ".json,application/json"
+        : t === "image"
+          ? "image/png,image/jpeg,image/webp"
+          : ".pdf";
+
+  const dropLabel = (t: InputType) =>
+    t === "ccda"
+      ? "C-CDA XML"
+      : t === "json"
+        ? "JSON"
+        : t === "image"
+          ? "prescription image (PNG/JPG/WEBP)"
+          : "PDF";
+
   return (
-    <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Upload Document</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <Tabs value={inputType} onValueChange={(v) => { setInputType(v as "pdf" | "ccda" | "json"); setFile(null); if (fileRef.current) fileRef.current.value = ""; }}>
-            <TabsList className="w-full">
-              <TabsTrigger value="pdf" className="flex-1">PDF Report</TabsTrigger>
-              <TabsTrigger value="ccda" className="flex-1">C-CDA (XML)</TabsTrigger>
-              <TabsTrigger value="json" className="flex-1">JSON</TabsTrigger>
-            </TabsList>
-          </Tabs>
-
-          <div>
-            <Label className="mb-2 block">File</Label>
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              className="group flex w-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border bg-muted/40 px-4 py-10 text-center transition-colors hover:border-primary hover:bg-accent/50"
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Upload Document</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <Tabs
+              value={inputType}
+              onValueChange={(v) => {
+                setInputType(v as InputType);
+                resetFile();
+                setResult(null);
+              }}
             >
-              <Cloud className="size-8 text-muted-foreground group-hover:text-primary" />
-              <p className="text-sm font-medium">
-                {file
-                  ? file.name
-                  : `Drop ${inputType === "ccda" ? "C-CDA XML" : inputType === "json" ? "JSON" : "PDF"} here or click`}
-              </p>
-              {file && (
-                <p className="text-xs text-muted-foreground">
-                  {(file.size / 1024).toFixed(1)} KB
+              <TabsList className="w-full">
+                <TabsTrigger value="pdf" className="flex-1">PDF Report</TabsTrigger>
+                <TabsTrigger value="ccda" className="flex-1">C-CDA (XML)</TabsTrigger>
+                <TabsTrigger value="json" className="flex-1">JSON</TabsTrigger>
+                <TabsTrigger value="image" className="flex-1">Image </TabsTrigger>
+              </TabsList>
+            </Tabs>
+
+            {inputType === "image" && (
+              <div className="flex items-start gap-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
+                <Languages className="mt-0.5 size-4 shrink-0 text-primary" />
+                <span>
+                  Upload a Kannada, Hindi, Tamil, or English prescription image. AI extracts the
+                  text, translates it to English, and generates FHIR medication records.
+                </span>
+              </div>
+            )}
+
+            <div>
+              <Label className="mb-2 block">File</Label>
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                className="group flex w-full flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border bg-muted/40 px-4 py-10 text-center transition-colors hover:border-primary hover:bg-accent/50"
+              >
+                <Cloud className="size-8 text-muted-foreground group-hover:text-primary" />
+                <p className="text-sm font-medium">
+                  {file ? file.name : `Drop ${dropLabel(inputType)} here or click`}
                 </p>
-              )}
-              <input
-                ref={fileRef}
-                type="file"
-                accept={
-                  inputType === "ccda"
-                    ? ".xml,.cda"
-                    : inputType === "json"
-                      ? ".json,application/json"
-                      : ".pdf"
-                }
-                className="hidden"
-                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              />
-            </button>
-          </div>
-
-          <Button className="w-full" onClick={submit} disabled={loading}>
-            {loading ? "Processing..." : "Upload & Convert to FHIR"}
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">What Happens</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          {[
-            {
-              step: "01",
-              title: "Upload",
-              desc:
-                inputType === "pdf"
-                  ? "PDF uploaded to server."
-                  : inputType === "json"
-                    ? "JSON document uploaded to server."
-                    : "C-CDA XML uploaded to server.",
-            },
-            {
-              step: "02",
-              title: "Convert",
-              desc:
-                inputType === "pdf"
-                  ? "pdfjs-dist extracts text → regex-structured record → FHIR Bundle (Patient + Observations + MedicationRequests + Conditions)."
-                  : inputType === "json"
-                    ? "Microsoft FHIR Converter applies the JSON Liquid template (ExamplePatient) → FHIR Bundle."
-                    : "Microsoft FHIR Converter (Liquid templates) maps C-CDA → FHIR.",
-            },
-            {
-              step: "03",
-              title: "Store",
-              desc: "FHIR Bundle stored on HAPI FHIR server under your identity.",
-            },
-            {
-              step: "04",
-              title: "Visible",
-              desc: "Records appear in Health Records tab immediately.",
-            },
-          ].map((s) => (
-            <div key={s.step} className="flex gap-4">
-              <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-mono text-primary">
-                {s.step}
-              </div>
-              <div>
-                <p className="text-sm font-medium">{s.title}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">{s.desc}</p>
-              </div>
+                {file && (
+                  <p className="text-xs text-muted-foreground">
+                    {(file.size / 1024).toFixed(1)} KB
+                  </p>
+                )}
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept={acceptFor(inputType)}
+                  className="hidden"
+                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                />
+              </button>
             </div>
-          ))}
-        </CardContent>
-      </Card>
+
+            <Button className="w-full" onClick={submit} disabled={loading}>
+              {loading
+                ? "Processing..."
+                : inputType === "image"
+                  ? "Translate & Convert to FHIR"
+                  : "Upload & Convert to FHIR"}
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">What Happens</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {(inputType === "image"
+              ? [
+                  { step: "01", title: "Upload", desc: "Prescription image uploaded to server and stored securely." },
+                  { step: "02", title: "Understand", desc: "Groq vision model performs OCR, detects the language, translates to English, and extracts structured medications." },
+                  { step: "03", title: "Convert", desc: "Medications are mapped to FHIR R4 MedicationRequest resources." },
+                  { step: "04", title: "Store", desc: "FHIR bundle stored on HAPI; meds appear in Health Records & Prescriptions tabs." },
+                ]
+              : [
+                  {
+                    step: "01",
+                    title: "Upload",
+                    desc:
+                      inputType === "pdf"
+                        ? "PDF uploaded to server."
+                        : inputType === "json"
+                          ? "JSON document uploaded to server."
+                          : "C-CDA XML uploaded to server.",
+                  },
+                  {
+                    step: "02",
+                    title: "Convert",
+                    desc:
+                      inputType === "pdf"
+                        ? "pdfjs-dist extracts text → regex-structured record → FHIR Bundle (Patient + Observations + MedicationRequests + Conditions)."
+                        : inputType === "json"
+                          ? "Microsoft FHIR Converter applies the JSON Liquid template (ExamplePatient) → FHIR Bundle."
+                          : "Microsoft FHIR Converter (Liquid templates) maps C-CDA → FHIR.",
+                  },
+                  { step: "03", title: "Store", desc: "FHIR Bundle stored on HAPI FHIR server under your identity." },
+                  { step: "04", title: "Visible", desc: "Records appear in Health Records tab immediately." },
+                ]
+            ).map((s) => (
+              <div key={s.step} className="flex gap-4">
+                <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-mono text-primary">
+                  {s.step}
+                </div>
+                <div>
+                  <p className="text-sm font-medium">{s.title}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{s.desc}</p>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+
+      {result && <TranslationResult result={result} showJson={showJson} onToggleJson={() => setShowJson((v) => !v)} />}
     </div>
+  );
+}
+
+function TranslationResult({
+  result,
+  showJson,
+  onToggleJson,
+}: {
+  result: TranslateResult;
+  showJson: boolean;
+  onToggleJson: () => void;
+}) {
+  const { extraction, bundle } = result;
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Languages className="size-4 text-primary" />
+            Translated Prescription
+          </CardTitle>
+          <Badge variant="secondary">
+            {extraction.detectedLanguageName} ({extraction.detectedLanguage})
+          </Badge>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {extraction.warnings.length > 0 && (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+            <p className="font-medium">Notes</p>
+            <ul className="mt-1 list-disc pl-4">
+              {extraction.warnings.map((w, i) => (
+                <li key={i}>{w}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {(extraction.prescriber || extraction.patientName || extraction.prescribedDate) && (
+          <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+            {extraction.patientName && <span><span className="font-medium text-foreground">Patient:</span> {extraction.patientName}</span>}
+            {extraction.prescriber && <span><span className="font-medium text-foreground">Prescriber:</span> {extraction.prescriber}</span>}
+            {extraction.prescribedDate && <span><span className="font-medium text-foreground">Date:</span> {extraction.prescribedDate}</span>}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div>
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Original ({extraction.detectedLanguageName})</p>
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-muted/50 p-3 text-sm">{extraction.extractedText || "—"}</pre>
+          </div>
+          <div>
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">English</p>
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-muted/50 p-3 text-sm">{extraction.translatedText || "—"}</pre>
+          </div>
+        </div>
+
+        <div>
+          <p className="mb-2 text-sm font-semibold">Medications ({extraction.medications.length})</p>
+          {extraction.medications.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No medications extracted.</p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-border">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-muted/50 text-xs uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2">Medicine</th>
+                    <th className="px-3 py-2">Dosage</th>
+                    <th className="px-3 py-2">Frequency</th>
+                    <th className="px-3 py-2">Duration</th>
+                    <th className="px-3 py-2">Instructions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {extraction.medications.map((m, i) => (
+                    <tr key={i} className="border-t border-border">
+                      <td className="px-3 py-2 font-medium">{m.name}</td>
+                      <td className="px-3 py-2">{m.dosage || "—"}</td>
+                      <td className="px-3 py-2">{m.frequency || "—"}</td>
+                      <td className="px-3 py-2">{m.duration || "—"}</td>
+                      <td className="px-3 py-2">{m.instructions || (m.route ? m.route : "—")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div>
+          <Button variant="outline" size="sm" onClick={onToggleJson}>
+            {showJson ? "Hide FHIR JSON" : "Show FHIR JSON"}
+          </Button>
+          {showJson && (
+            <pre className="mt-3 max-h-96 overflow-auto rounded-lg bg-muted/50 p-3 text-xs">{JSON.stringify(bundle, null, 2)}</pre>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
